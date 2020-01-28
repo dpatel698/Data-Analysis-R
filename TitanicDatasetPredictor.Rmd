@@ -1,0 +1,79 @@
+---
+title: "Patel_D_12"
+output: html_notebook
+---
+
+1. Divide the provided data set into random two subsets: a training data set (70%)  and a test data set (30%).
+```{r}
+library(dplyr)
+# Import the entire data set into a data frame
+data <- read.csv("titanic_data.csv")
+
+training_data <- sample_n(data, round(nrow(data) * .7))
+
+test_data <- sample_n(data, round(nrow(data) * .3))
+```
+
+2. Construct a logistic regression model to predict the probability of a passenger surviving the Titanic accident.
+```{r}
+# First we will deal with missing values for certain columns in out our data set
+colSums(is.na(training_data))
+```
+
+NOTE: I chose not to impute the missing data in the variable here because the accuracy of my model decreased slightly
+      later in the notebook when I did so.
+```{r}
+# It seems the age column has various missing values so we will impute them with the median value to not skew the age variable
+
+#training_data[is.na(training_data$Age), c("Age")] <- median(training_data$Age, na.rm = TRUE)
+
+colSums(is.na(training_data))
+```
+
+
+```{r}
+# Now we will train our model with the data we have subsetted for training 
+survival.glm <- glm(formula=Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Cabin + Embarked,
+                    data=training_data,
+                    family=binomial)
+```
+
+
+3. Test the statistical significance of all parameters and eliminate those that have a p-value > 0.05
+```{r}
+summary(survival.glm)
+```
+
+
+NOTE: Some columns were eliminated from the data because when we included them they gave p-values > .05 for that parameter or the model would not work with them included
+
+Parameters eliminated: PassengerID, Name, Parch, Fare, Cabin, Embarked
+```{r}
+# Run the model again with the non-significant variables omitted
+survival.glm <- glm(formula=Survived ~ Pclass + Sex + Age + SibSp,
+                    data=training_data,
+                    family=binomial(link="logit"))
+summary(survival.glm)
+```
+
+4.Test the model against the test data set and determine its prediction accuracy (as a percentage correct).
+```{r}
+pred <- predict(survival.glm, newdata = test_data, type = "response")
+guess <- ifelse(pred > .5, 1, 0)
+error <- mean(guess != test_data$Survived,na.rm = TRUE)
+
+print(paste('Accuracy',1-error))
+```
+5.Determine if the model has bias, e.g., false positives (someone is called dead when they actually survived) vs false negatives (someone classified as survived when they actually died).
+```{r}
+false_positives <- test_data$Survived == 1 & guess == 0
+print(paste("False postive total:", table(false_positives)["TRUE"]))
+print(paste("False postive ratio:", (table(false_positives)["TRUE"]) / nrow(test_data)))
+```
+
+```{r}
+false_negatives <- test_data$Survived == 0 & guess == 1
+print(paste("False negative total:", table(false_negatives)["TRUE"]))
+print(paste("False negative ratio:", (table(false_negatives)["TRUE"]) / nrow(test_data)))
+```
+There is bias present in the model since there are both false positives and negatives.

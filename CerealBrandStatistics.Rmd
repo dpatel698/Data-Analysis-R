@@ -1,0 +1,170 @@
+---
+title: "Patel_D_10"
+output: html_notebook
+---
+Cereal Data set
+
+we will first work with the cereal data set and perform various tasks on it
+
+```{r}
+require(readxl)
+# Import the excel file into a data frame 
+cereal_data <- read_xls("cereal_data__for_slide_deck_.xls", sheet = 2)
+
+cereal_data
+```
+1. Using the Cereal Data set, determine the mean, median, range, mode, and standard deviation of the carbs and fiber variables
+```{r}
+library(dplyr)
+
+carb_mean <- mean(cereal_data$Carbs)
+fiber_mean <- mean(cereal_data$Fiber)
+sprintf("The mean for carbs: %g", carb_mean)
+sprintf("The mean for fiber: %g", fiber_mean)
+
+carb_median <- median(cereal_data$Carbs)
+fiber_median <- median(cereal_data$Fiber)
+sprintf("The median for carbs: %g", carb_median)
+sprintf("The median for fiber: %g", fiber_median)
+
+carb_range <- range(cereal_data$Carbs)
+fiber_range <- range(cereal_data$Fiber)
+sprintf("The range for carbs: %s - %s", carb_range[1], carb_range[2])
+sprintf("The range for fiber: %s - %s", fiber_range[1], fiber_range[2])
+
+carb_mode <- as.numeric(names(table(cereal_data$Carbs))[1])
+fiber_mode <- as.numeric(names(table(cereal_data$Fiber))[1])
+sprintf("The mode for carbs: %g", carb_mode)
+sprintf("The mode for fiber: %g", fiber_mode)
+
+carb_std <- sd(cereal_data$Carbs)
+fiber_std <- sd(cereal_data$Fiber)
+sprintf("The standard deviation for carbs: %g", carb_std)
+sprintf("The standard deviation for fiber: %g", fiber_std)
+
+```
+
+2. Histograms for calories and sugar variables
+```{r}
+library(ggplot2)
+ggplot(data = cereal_data, aes(cereal_data$Calories)) +  geom_histogram() +
+  labs(title="Histogram for Calories") +
+  labs(x="Calories", y="Cereals Count") 
+```
+```{r}
+library(ggplot2)
+ggplot(data = cereal_data, aes(cereal_data$Sugars)) +  geom_histogram() +
+  labs(title="Histogram for Sugars") +
+  labs(x="Calories", y="Cereals Count") 
+```
+
+3. Scatterplots of the Carbs and Fiber variables
+```{r}
+ggplot(data = cereal_data, aes(x = Carbs, y = Fiber)) + geom_point() +
+  labs(title="Scatterplot Carbs vs Fiber")
+```
+
+4. Pearson Moment and the Spearman Rank correlation coefficients for the calories and fiber variables
+```{r}
+# The Pearson Moment Formula:
+# z(k) = k - mean(k) / std(k)
+# Pearson Moment = sum(1, n, z(x) * z(y)) / n - 1
+cal_fib_moment <- cor(cereal_data$Calories, cereal_data$Fiber)
+cal_fib_moment
+
+```
+There is a negative correlation between the amount of calories and fiber in data. As calories rise fiber falls.
+
+```{r}
+# Spearman Rank Correlation
+cal_fib_rho <- cor(cereal_data$Calories, cereal_data$Fiber, method = "spearman")
+cal_fib_rho
+
+```
+The speaman coefficient also shows a negative correlation. Calories up = fiber down
+
+##########################################################################################
+Grades Data Set
+
+```{r}
+require(openxlsx)
+# Import the data for fall and spring into seperate data frames
+fall_grades_data <- read.xlsx("workshop_data_set__grades_2018.xlsx", sheet = 1, startRow = 2)
+spring_grades_data <- read.xlsx("workshop_data_set__grades_2018.xlsx", sheet = 2, startRow = 3)
+
+head(fall_grades_data)
+```
+```{r}
+print(head(spring_grades_data))
+```
+
+1. Using the Grades Data set, determine the mean, median, range, mode, and standard deviation of the Score variable for Fall and Spring.
+```{r}
+
+fall_mean <- mean(fall_grades_data$Score)
+spring_mean <- mean(spring_grades_data$Score)
+sprintf("The mean for fall: %g", fall_mean)
+sprintf("The mean for spring: %g", spring_mean)
+
+fall_median <- median(fall_grades_data$Score)
+spring_median <- median(spring_grades_data$Score)
+sprintf("The median for fall: %g", fall_median)
+sprintf("The median for spring: %g", spring_median)
+
+fall_range <- range(fall_grades_data$Score)
+spring_range <- range(spring_grades_data$Score)
+sprintf("The range for fall: %s - %s", fall_range[1], fall_range[2])
+sprintf("The range for fall: %s - %s", spring_range[1], spring_range[2])
+
+fall_mode <- as.numeric(names(table(fall_grades_data$Score))[1])
+spring_mode <- as.numeric(names(table(spring_grades_data$Score))[1])
+sprintf("The mode for fall: %g", fall_mode)
+sprintf("The mode for spring: %g", spring_mode)
+
+fall_std <- sd(fall_grades_data$Score)
+spring_std <- sd(spring_grades_data$Score)
+sprintf("The standard deviation for fall: %g", fall_std)
+sprintf("The standard deviation for spring: %g", spring_std)
+```
+2. Pearson Moment and the Spearman Rank correlation coefficients for the fall score and excel quiz variables
+```{r}
+# The Pearson Moment Formula:
+# z(k) = k - mean(k) / std(k)
+# Pearson Moment = sum(1, n, z(x) * z(y)) / n - 1
+score_quiz_moment <- cor.test(fall_grades_data$Score, fall_grades_data$Excel.Quiz)
+score_quiz_moment
+
+```
+There is a positive correlation between the amount of calories and fiber in data. As scores rise quiz grades rise. It is statistically significant.
+
+```{r}
+# Spearman Rank Correlation
+score_quiz_rho <- cor.test(fall_grades_data$Score, fall_grades_data$Excel.Quiz, method = "spearman")
+score_quiz_rho
+
+```
+The speaman coefficient also shows a positive correlation. Score up = Excel Quiz up, the pvalue is small and so its is
+statistically significant
+
+3. Scatter plot using the Fall score and the Excel Quiz variable
+```{r}
+ggplot(data = fall_grades_data, aes(x = Score, y = Excel.Quiz)) + geom_point() +
+  labs(title="Scatterplot Score vs Excel Quiz")
+```
+
+```{r}
+binning_frame <- data.frame(bins=integer(1000))
+
+for(i in 1:1000){
+binning_frame[i, "bins"] <- mean(sample(fall_grades_data$Score,round(length(fall_grades_data) * .2)))
+}
+
+binning_frame
+
+bins <- cut(binning_frame[, "bins"], 100, include.lowest = TRUE)
+
+plot(bins)
+
+```
+From this plot we can see the distribution is skewed left and most scores are concentrated in the 93-96 range.
+

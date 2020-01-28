@@ -1,0 +1,186 @@
+---
+title: "Patel_D_11"
+output: html_notebook
+---
+
+First we import the data set from an excel file
+```{r}
+library(openxlsx)
+
+# Import the UFFI data into a data frame
+uffi_data <- read.xlsx("uffidata.xlsx", sheet = 1, startRow = 1)
+```
+
+Lets take a look at the data and what variables it consists of
+```{r}
+head(uffi_data)
+```
+
+We are looking for outliers in the data set, however what variables should we focus on?
+Outlier Assessment Method:
+  1. Look at numerical, non-binary values
+  2. Boxplot the values and find values outside of the Interquartile Range (IQR)
+  3. Compare Spearman rank and Pearson correlation of the values in the column and if they are close then keep the outliers,
+     if not exclude the outliers (Assign them as the median value in the data)
+```{r}
+# First we evaluate the Observation variable
+obs_box <- boxplot(uffi_data$Observation, plot=FALSE)$out
+head(uffi_data[uffi_data$Observation %in% obs_box], 1)
+```
+There are no outliers so no action is needed for the Observation variable
+
+
+
+```{r}
+# Evaluate the Sale.Price variable
+price_box <- boxplot(uffi_data$Sale.Price, plot=FALSE)$out
+price_outliers <- uffi_data[which(uffi_data$Sale.Price %in% price_box),]
+price_outliers
+```
+There are outpliers so we apply step 3 for our outlier assessment method
+```{r}
+# WARNING: Running the cell twice before running cell with line 10 will give an error
+price_orig <- uffi_data$Sale.Price
+uffi_data$Sale.Price[uffi_data$Sale.Price %in% price_box] <- median(price_orig)
+```
+
+```{r}
+cor(uffi_data$Sale.Price, price_orig)
+
+```
+Removing outliers will effect the data so we will keep them in the dataset
+```{r}
+uffi_data$Sale.Price <- price_orig
+```
+
+
+
+```{r}
+# Evaluate the Bsmnt.Fin_SF variable
+bsmt_box <- boxplot(uffi_data$Bsmnt.Fin_SF, plot=FALSE)$out
+bsmt_outliers <- uffi_data[which(uffi_data$SBsmnt.Fin_SF %in% bsmt_box),]$Bsmnt.Fin_SF
+bsmt_outliers
+```
+There are no outliers for the Bsmnt.Fin_SF variable
+
+
+
+```{r}
+# Evaluate the Lot.Area variable
+area_box <- boxplot(uffi_data$Lot.Area, plot=FALSE)$out
+area_outliers <- uffi_data[which(uffi_data$Lot.Area %in% area_box),]$Lot.Area
+area_outliers
+```
+There are outpliers so we apply step 3 for our outlier assessment method
+```{r}
+# WARNING: Running the cell twice before running cell with line 10 will give an error
+area_orig <- uffi_data$Lot.Area
+uffi_data$Lot.Area[uffi_data$Lot.Area %in% area_box] <- median(area_orig)
+```
+
+```{r}
+cor(uffi_data$Lot.Area, area_orig)
+```
+Removing outliers doesn't effect the data (Correlation constant is close to 1) so we will remove them (already done above)
+
+
+
+```{r}
+# Evaluate the Living.Area_SF variable
+live_box <- boxplot(uffi_data$Living.Area_SF, plot=FALSE)$out
+live_outliers <- uffi_data[which(uffi_data$Living.Area_SF %in% live_box),]$Living.Area_SF
+live_outliers
+```
+There are outliers so we apply step 3 for our outlier assessment method
+```{r}
+# WARNING: Running the cell twice before running cell with line 10 will give an error
+live_orig <- uffi_data$Living.Area_SF
+uffi_data$Living.Area_SF[uffi_data$Living.Area_SF %in% live_box] <- median(live_orig)
+```
+
+```{r}
+cor(uffi_data$Living.Area_SF, live_orig)
+```
+Removing outliers doesn't effect the data (Correlation constant is close to 1) so we will remove them (already done above)
+
+
+2. Using visual analysis of the sales price with a histogram, is the data normally distributed and thus amenable to parametric statistical analysis?
+```{r}
+library(ggplot2)
+ggplot(data = uffi_data, 
+       mapping = aes(x = Sale.Price)) + geom_histogram(bins=50)
+
+```
+```{r}
+summary(uffi_data$Sale.Price)
+shapiro.test(uffi_data$Sale.Price)
+```
+**The data is skewed right and is not normally distributed**
+
+3. Using a z-test, is the presence or absence of UFFI alone enough to predict the value of a residential property?
+Method:
+1. We will do a two-sample z-test on the populations of houses with and without UFFI 
+2. The Z-Score will determine if there is a significant difference between the two populations and each other and th full dataset
+   our alpha is 0.05 so if the z-score is  beyond +- 1.96 there is a significant difference
+3. Make a determination on the price based on the results
+```{r}
+# Calculates the proper variance with length (n)
+var.p <- function(x){var(x)*(length(x)-1)/length(x)}
+
+two_samp_z <- function(x, y){
+  # Calculates the z-score
+  #
+  # Args:
+  # x- first sample
+  # y- second sample
+  #
+  # Returns:
+  # Z-score for the two sample z-test of x and y 
+   n.x <- length(x)
+   n.y <- length(y)
+   z <- (mean(x) - mean(y)) / (sqrt(var.p(x)/n.x + var.p(y)/n.y))
+   return(z)
+}
+```
+
+```{r}
+# Obtain the two populations
+with_uffi <- uffi_data$Sale.Price[uffi_data$UFFI.IN == 1]
+without_uffi <- uffi_data$Sale.Price[uffi_data$UFFI.IN == 0]
+
+# Run the Z-tests
+two_samp_z(with_uffi, without_uffi)
+two_samp_z(with_uffi, uffi_data$Sale.Price)
+two_samp_z(without_uffi, uffi_data$Sale.Price)
+```
+The presence or absence of uffi is not enough to predict the value of the residential property
+
+4. Is UFFI a significant predictor variable of selling price when taken with the full set of variables available?
+We will do an ANOVA of the sales price data between groups (Had UFFI- 1 or Did not have UFFI - 0)
+```{r}
+library(dplyr)
+group_by(uffi_data, UFFI.IN) %>%
+  summarise(
+    count = n(),
+    mean = mean(Sale.Price, na.rm = TRUE),
+    sd = sd(Sale.Price, na.rm = TRUE)
+  )
+
+```
+```{r}
+# Compute the ANOVA
+res.aov <- aov(Sale.Price ~ UFFI.IN, data = uffi_data)
+# summarize the ANOVA values
+summary(res.aov)
+```
+
+No the UFFI is not a significant predictor when taken with the full set of variables. There is not significant evidence
+from the ANOVA to conclude the full set is a significant predictor (p-val greater than .05)
+
+
+5. What is the ideal multiple regression model for predicting home prices in this data set? Provide a detailed analysis of the         model, including Adjusted R-Squared, MAD, and p-values of principal components.
+```{r}
+# Use the LM function with formula with all varibles (process of elimination)
+```
+
+

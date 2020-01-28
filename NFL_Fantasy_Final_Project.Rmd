@@ -1,0 +1,536 @@
+---
+title: "NFL_Fantasy_Scores_And_Player_Performance"
+author: "Darshil Patel"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# Exploration and Modeling of NFL Player Fantasy Performance 
+
+This notebook contains code and text for the final project of DS4100 Data Collection, and Analysis.
+
+For my final project I explored NFL player fanstasy performance and indvividual in-game player performance.
+One of the goals of this project is to model fantasy football scores using player performance metrics and identify key metrics
+that might help an individual pick fanstasy players for their next draft. 
+
+The predictions will be of seasonal performance and not weekly game to game fantasy performance.
+
+##The analytics process of this project is as follows:
+
+1. Data Collection/Acquistion:
+
+For this project I will be using an an API called ffanalytics to pull in player data which can retrieve fantasy scores and game performance. 
+I will store the data in a database which I will query to get the data points for my analysis.
+
+2. Data Exploration and Cleaning
+
+  For this step I will make simple visualizations of my data to get a sense of its properties and distributions.
+  At this step I will also deal with NA values and outliers (I may choose to keep outliers if the model suffers
+  from removing them)
+
+3. Data Storage
+
+  I will store the data in a database which I will query to get the data points for my analysis. This may form multiple tables
+  which I will join to retrieve the appropriate data.
+  
+4. Data Visualization and Further Exploration
+
+  Here I will visualize the data with more complexity in order to distill information about players and teams.
+  Here I will split my visualizations based on aggregated player data and split by metrics such as player position.
+  
+5. Data Modeling
+
+  
+  Using the information from the above steps I plan on using multiple linear regression to model fantasy football scores.
+  I will split my data into training/testing subsets and iteratively add and remove features. If the above analysis                
+  provides rationale for an alternate model I will apply other models to perhaps achieve a better predictor. The data
+  will be put into the model using backwards fitting for comparison of models.
+
+
+##Data Collection/Acquisition 
+
+```{r}
+# First we will install the required packages needed to use the ffanalytics API
+# NO NEED TO RUN IF ALREADY INSTALLED (Comment out and run the following if needed)
+
+#install.packages(c("devtools"), dependencies=TRUE, repos=c("http://rstudio.org/_packages", "http://cran.rstudio.com"))
+#devtools::install_github(repo = "FantasyFootballAnalytics/ffanalytics", build_vignettes = TRUE)
+
+```
+
+```{r}
+library(ffanalytics)
+```
+
+In order to make the model and evaluate player performance I will use the most recent season (2016-2017) 
+Only Yahoo fantasy scores will be used (There are various others that are similiar)
+```{r}
+# Now we will use the API to scrape data from various sources for fantasy football information
+
+# First we will take in player information for all scoring offensive positions
+# The postions are: Quarterback, Runningback, Wide Reciever, Tight End, and Defense/Special Teams
+player_data <- scrape_data(src = c("Yahoo"), 
+                         pos = c("QB", "RB", "WR", "TE", "DST"),
+                         season = 2018, week = 0) # Week 0 of 2018 retrieves the 2016-2017 totals
+```
+
+
+```{r}
+head(player_data)
+```
+
+
+
+## Data Exploration 
+
+On first inspection it seems the data is split into 5 data frames pertaining to each position
+
+We will to merge the postions to create a model later and also keep seperate to see if separating by postion
+gives better predictions.
+
+1. Next we will merge the data into a single data frame
+2. After storing the data the pos column will allow us to split and analyze the data based on positions
+```{r}
+# The tables for QB, WR, TE, and RB have common columns so we can stack the rows using rbind
+player_data_merged <- rbind(player_data$QB, player_data$RB, player_data$WR, player_data$TE)
+
+# Defensive and special teams players have their own unique metrics that we have to 
+player_data_final <- plyr::rbind.fill(player_data_merged, player_data$DST)
+
+head(dplyr::filter(player_data_final, player_data_final$pos == "DEF"))
+
+```
+
+For the next steps in the analysis we will visualize the distribution of variable split by position
+
+This will be done using density curves so can see multiple distributions at once for passing, rushing, running, defense
+
+Passing Statistics distribution
+```{r}
+passing_data <- subset(player_data_final, select = pass_att:passing_pick_six)
+hist(player_data_final$pass_att)
+
+```
+
+##Data Cleaning
+
+We will first deal with outliers in our data, split by postion.
+We are doing this before any visualizations because inspection of the data shows many players do not get playing time (above) 
+and thus have low sometimes zero for many of their statistics (We will eliminate those players from the data set)
+
+Passing Statistics Outlier Detection and Removal
+```{r}
+# We will first aggregate the statistics by summing over those columns
+pass_cols <- c("pass_att", "pass_comp", "pass_inc", "pass_yds", "pass_tds", "pass_int")
+qbacks <- filter(player_data_final, player_data_final$pos == "QB")
+
+passers <- qbacks %>%
+       replace(is.na(.), 0) %>%
+       mutate(sum = rowSums(.[,pass_cols]))
+
+avg_pass <- mean(passers$sum)
+passers <- passers[passers$sum > avg_pass - 500, ] # Outliers are based on aggregated passer performance average minus a                                                         threshold determined by me based on the aggregates
+
+qbacks <- passers[,1:length(passers) - 1] # remove summed aggregates
+```
+
+Receiving Statistics Outlier Detection and Removal
+```{r}
+# We will first aggregate the statistics by summing over those columns
+rec_cols <- c( "rec_tgt", "rec", "rec_yds", "rec_tds", "rec_1st", "rec_40_yds", "ret_yds", "ret_tds")
+recievers <- filter(player_data_final, player_data_final$pos %in% c("WR", "TE"))
+
+recs <- recievers %>%
+       replace(is.na(.), 0) %>%
+       mutate(sum = rowSums(.[,rec_cols]))
+
+avg_rec <- mean(recs$sum)
+recs<- recs[recs$sum > avg_rec, ]  # Outliers are based on aggregated recieving performance average (the average is                                            skewed toward lower aggregates)
+
+recievers <- recs[,1:length(recs) - 1] # remove summed aggregates
+```
+
+
+Rushing Statistics Outlier Detection and Removal
+```{r}
+rush_cols <- c("rush_att", "rush_yds", "rush_tds", "rush_1st", "rush_40_yds")
+rushers <- filter(player_data_final, player_data_final$pos =="RB")
+
+rb <-  rushers %>%
+       replace(is.na(.), 0) %>%
+       mutate(sum = rowSums(.[,rush_cols]))
+
+avg_rush <- mean(rb$sum)
+rb<- rb[rb$sum > avg_rush, ]  # Outliers are based on aggregated recieving performance average (the average is                                            skewed toward lower aggregates)
+rb <- rb[,1:length(rb) - 1] # remove summed aggregates
+```
+
+For Defense/Special Teams rows the metrics represent an enitre team and this problem is not present and if it is there are very few points so we will keep all the DSTs
+```{r}
+# Collect the data without the outliers into a single dataset
+dsts<- filter(player_data_final, player_data_final$pos == "DEF")
+players_data_out <- rbind(qbacks, recievers, rb, dsts)
+
+head(dsts) # Check out defensive players
+```
+
+Converting fantasy owned percentages to numeric
+```{r}
+#We will use the percent owned column in the table for our model so we need to convert it from a string to a number
+players_data_out$fantasy_percent_owned <- lapply(players_data_out$fantasy_percent_owned, FUN = function(x) X =                                                               as.numeric(gsub("%","", x))/100)
+players_data_out$fantasy_percent_owned <- unlist(players_data_out$fantasy_percent_owned)
+dplyr::filter(players_data_out, players_data_out$pos == "QB")$fantasy_percent_owned
+```
+
+###Handling NA Values
+```{r}
+numeric_cols <- c(pass_cols, rush_cols, rec_cols, c("dst_pts_allowed", "dst_sacks", "dst_safety", "dst_tfl",
+                                                 "dst_fum_rec", "dst_td", "dst_blk", "dst_4_down", "dst_yds_allowed",                                                            "dst_3_out", "dst_ret_yds", "dst_ret_tds"))
+players_temp <- players_data_out
+
+for(i in numeric_cols){
+  players_data_out[is.na(players_data_out[,i]), i] <- mean(players_data_out[,i], na.rm = TRUE)
+}
+
+head(players_data_out)
+```
+
+##Data Storage and Retrieval
+At this point we have good quality data that we hope to put into our model. So We will create a database and then 
+retrieve the data from our database for the rest of our analysis
+```{r}
+library(RSQLite)
+db <- dbConnect(SQLite(), dbname="fantasy.sqlite")
+
+# We will write the data into a new table in the database
+dbWriteTable(conn = db, name = "players", value = players_data_out,  row.names = FALSE, header = TRUE, overwrite = TRUE)
+
+# Now that we have made the database we can retrieve the data from it
+players <- dbReadTable(db, "players")
+
+dbDisconnect(db)
+```
+
+Let's see if our storage and retrieval worked correctly
+```{r}
+head(players)
+```
+
+
+##Data Exploration (Continued)
+
+###Distribution of Variables
+
+Now we will look at the distributions of variables split by position
+
+There are many variables so to keep the plotting concise I will lay all of them out in a grid of so we
+can see all of them quickly and at the same time
+
+Passing variables
+```{r}
+pass_plot_cols <- passers[, pass_cols]
+
+list <-lapply(pass_cols,
+              function(col) qplot(pass_plot_cols[,col], xlab = col, main = paste("Distribution of", col)))
+
+cowplot::plot_grid(plotlist = list)
+
+```
+The passing variables are very discrete and are not very normal at all. There is however some concentration
+round the means and atendecny towards higher values across pass_inc, pass_att, and pass_comp variables.
+The distribution shape might be indicative of the fact that the quaterback sample is too small there are roughly 
+over 30 quaterbacks we chose to include in the data set
+
+
+Recieving Variables
+```{r}
+rec_plot_cols <- recs[, rec_cols]
+
+list <-lapply(rec_cols,
+              function(col) qplot(rec_plot_cols[,col], xlab = col, main = paste("Distribution of", col)))
+
+cowplot::plot_grid(plotlist = list)
+```
+These distributions make us confident that there is a sufficient sample of recievers since the data looks more
+continuous than for quarterbacks. TheFirst 5 of these data distributions are skewed right, but around the
+mean show some degree of normality.
+
+The final 3 distributions just show how rare such plays are for recievers
+a subset of recievers return kicks which is what these represent. Thus the data is much more spare and tends
+toward zero. 
+
+rec_40_yds which represents 40 yard receptions are also rare and may indicate better fantasy performance
+
+
+Rushing Variables
+```{r}
+rush_plot_cols <- rushers[, rush_cols]
+
+list <-lapply(rush_cols,
+              function(col) qplot(rush_plot_cols[,col], xlab = col, main = paste("Distribution of", col)))
+
+cowplot::plot_grid(plotlist = list)
+```
+These distributions are indicitive of the nature of rushing in the NFL which for many teams and 
+runningbacks tends to give lower (tending toward zero) yardage and points.
+
+We attempted to eliminate the runningbacks which did not play that much, and still the distributions
+are skewed toward zero. This will be important to account for in the model when assessing rushing metrics and if they
+have impact on the regression.
+
+
+Defense/Special Teams Variables
+```{r}
+dst_cols <- c("dst_pts_allowed", "dst_sacks", "dst_safety", "dst_tfl",
+              "dst_fum_rec", "dst_td", "dst_blk", "dst_4_down", "dst_yds_allowed",                                                             "dst_3_out", "dst_ret_yds", "dst_ret_tds")
+
+dst_plot_cols <- dsts[, dst_cols]
+
+list <-lapply(dst_cols,
+              function(col) qplot(dst_plot_cols[,col], xlab = col, main = paste("Distribution of", col)))
+
+cowplot::plot_grid(plotlist = list)
+```
+These variables are not continuous as was the case with some of the previous positions. In these distributions we see greater
+variance. The plots are more spread out with peaks scattered locally across the x-axis. This will be interesting to see
+when we compare these to the independent variables such as overall points.
+
+
+
+###Correlation/Collinearity Analysis
+
+Again we will split our analysis by position
+
+Since we have many variables we will use a correlogram to visualize our correlations and
+then observe and go more into depth on select variables.
+```{r}
+library(corrplot)
+```
+
+Passing CorrPlot
+```{r}
+passing_corr_matrix <-cor(passers[, pass_cols])
+
+corrplot(passing_corr_matrix, method = "number", type = "lower")
+```
+
+Recieving CorrPlot
+```{r}
+rec_corr_matrix <-cor(recs[, rec_cols])
+
+corrplot(rec_corr_matrix, method = "number", type = "lower")
+```
+
+
+Rushing CorrPlot
+```{r}
+rush_corr_matrix <-cor(rushers[, rush_cols])
+
+corrplot(rush_corr_matrix, method = "number", type = "lower")
+```
+Defense/Special Teams CorrPlot
+```{r}
+dst_corr_matrix <-cor(dsts[, dst_cols])
+
+corrplot(dst_corr_matrix, method = "number", type = "lower")
+```
+
+Overall CorrPlot (All numeric metrics)
+```{r, fig.width=12, fig.height=10}
+big_corr_matrix <-cor(players[, c(rec_cols, pass_cols, dst_cols, rush_cols)])
+
+corrplot(big_corr_matrix, method = "number", type = "lower")
+```
+Evaluation of Correlations:
+
+For passing most metrics are positivey correlated as expected with pass interceptions being less tied to the positive
+performance metrics like passing yards.
+
+For recievers it looks like return tds and yards are negatively correlated with other metrics which points to the fact that recievers who perform this functions do not see regular play (rec_tds, rec_yds, etc.)
+
+For rushing there were fairly positive correlations throughout. 
+
+The case for defensive/special teams positions low or negative correlations were more prevalent with each other. This shows
+that better performance on the defensive end for one area may hinder others (ex. defense return tds vs defensive sacks. 
+
+With the large correlation plot of our variables we see that significant correlations are concentrated within positions
+(ex. passing metrics to other passing metrics)
+
+
+###Visualization of Independent Variables to Dependent Variable
+
+For this section we will employ the same strategy we used for the variable distributions. 
+Except this time we will plot the independent player metrics against the fantasy points (site_pts) variable.
+Split by position.
+
+Passing
+```{r}
+pass_plot_cols <- passers[, c(pass_cols, "site_pts")]
+
+list <-lapply(pass_cols,
+              function(col) qplot(x = pass_plot_cols[,col], y = pass_plot_cols[,"site_pts"], xlab = col, ylab = "Fantasy Points", geom = c("point", "smooth"), main = paste("Fan Pts Vs. ", col)))
+
+cowplot::plot_grid(plotlist = list)
+
+```
+Most of these features give postive relationships with the predictive variable. This is expected with the exception of
+pass interceptions with has a net negative impact on fantasy scores
+
+
+Recieving
+```{r}
+rec_plot_cols <- recs[, c(rec_cols, "site_pts")]
+
+list <-lapply(rec_cols,
+              function(col) qplot(x = rec_plot_cols[,col], y = rec_plot_cols[,"site_pts"], xlab = col, ylab = "Fantasy Points",                                     geom = c("point", "smooth"), main = paste("Fan Pts Vs. ", col)))
+
+cowplot::plot_grid(plotlist = list)
+
+```
+The positive relationhips are expected, but the negative and no relation is unusual. For the ret_tds feature
+this may mean we have to remove it from our feature set. The negative relationship with ret_yds may again indicate
+that players serving as returners get less regular reciever duties and thus less fantasy points
+
+
+Rushing
+```{r}
+rush_plot_cols <- rushers[, c(rush_cols, "site_pts")]
+
+list <-lapply(rush_cols,
+              function(col) qplot(x = rush_plot_cols[,col], y = rush_plot_cols[,"site_pts"], xlab = col, ylab = "Fantasy Points",                                     geom = c("point", "smooth"), main = paste("Fan Pts Vs. ", col)))
+
+cowplot::plot_grid(plotlist = list)
+
+```
+Again postive relations.
+The last variable might also be a candidate for removal from our features
+
+
+Defense/Special Teams
+```{r}
+dst_plot_cols <- dsts[, c(dst_cols, "site_pts")]
+
+list <-lapply(dst_cols,
+              function(col) qplot(x = dst_plot_cols[,col], y = dst_plot_cols[,"site_pts"], xlab = col, ylab = "Fantasy Points",                                     geom = c("point", "smooth"), main = paste("Fan Pts Vs. ", col)))
+
+cowplot::plot_grid(plotlist = list)
+
+```
+There is musch more variance in the plots of the defensive metrics. This as a whole may be a reason to separate
+this position from the rest of the data. However, there are mostly positive relationships although not clearly so.
+
+##Data Modeling 
+
+Now we will train a multivariable regression model with our dataset and then evaluate and tweak its performance as needed.
+
+###Feature Engineering: Review of variables to features
+There are certain variables we do not want to include in our model. We will drop those columns in out dataset
+
+
+On inspection of the columns there we will remove the following from the dataset:
+These columns are not related to player performance
+```{r}
+# Remove these variables:
+drop_these <- c("data_src","id", "src_id", "z", "note", "player", "team", "team", "status_game_opp", "z1", "forecast",
+                "owner", "games", "bye", "fantasy_percent_owned","rankings_proj", "rankings_actual", "na")
+
+player_data_for_model <- players[ ,!(names(players_data_out) %in% drop_these)]
+
+head(player_data_for_model)
+```
+
+
+###Model Construction
+
+First I will train the model with the raw data and then evaluate and tweak the model with new features,
+eliminate insignificant features, etc. Then compare my models to each other and see which performs best
+
+
+Initial Model
+
+```{r}
+initial_train <- sample_n(player_data_for_model, round(nrow(player_data_for_model) * .8))
+initial_test  <- sample_n(player_data_for_model, round(nrow(player_data_for_model) * .2))
+
+initial_model <- lm(site_pts ~ rec_tgt + rec + rec_yds + rec_tds + rec_1st + rec_40_yds + ret_yds + ret_tds
+                    + pass_att + pass_comp + pass_inc + pass_yds + pass_tds + pass_int + dst_pts_allowed + dst_sacks 
+                    + dst_safety + dst_tfl + dst_fum_rec + dst_td + dst_blk + dst_4_down + dst_yds_allowed + dst_3_out
+                    + dst_ret_yds + dst_ret_tds + rush_att + rush_yds + rush_tds + rush_1st + rush_40_yds,
+                    data = initial_train)
+
+summary(initial_model)
+
+```
+
+
+We will start with **backwards fitting** our parameters (Starting with all our features and removing them iteratively)
+
+
+###Model Peformance Measure: Evaluation of Fit
+From the summary of our initial model there are quite a few insignificant parameters (p-values > .05)
+We'll Evaluate he model with them included first
+```{r}
+# We will use the model to predict with out test data 
+# Mean Squared Error (MSE) will be used as a performance measure
+predicted <- predict(initial_model, newdata = initial_test, type = "response")
+
+initial_MSE <- sum((predicted - initial_test$site_pts) ** 2) / nrow(initial_test)
+
+initial_MSE
+```
+
+
+**Evaluation of Initial Model**
+With an MSE of 7.831822 our model already has a fairly low error number. The Adjusted R squared value is also 0.9992.
+More more data points may be neccessary for a more significant model. However with a high Adjusted R-Squared value it does perform strongly.
+
+
+Second Model
+We will use **backwards fitting** and remove insignificant parameters
+
+```{r}
+second_train <- sample_n(player_data_for_model, round(nrow(player_data_for_model) * .8))
+second_test  <- sample_n(player_data_for_model, round(nrow(player_data_for_model) * .2))
+
+second_model <- lm(site_pts ~ rec + rec_yds + rec_tds + ret_tds + pass_yds + pass_tds + pass_int + dst_pts_allowed + dst_sacks 
+                              + dst_fum_rec + dst_td + dst_blk + dst_3_out + dst_ret_tds + rush_yds + rush_tds, 
+                    data = initial_train)
+
+summary(second_model)
+```
+
+
+
+###Model Peformance Measure: Evaluation of Fit
+From the summary of our initial model there are quite a few insignificant parameters (p-values > .05)
+We'll Evaluate he model with them included first
+```{r}
+# We will use the model to predict with out test data 
+# Mean Squared Error (MSE) will be used as a performance measure
+predicted <- predict(second_model, newdata = second_test, type = "response")
+
+second_MSE<- sum((predicted - second_test$site_pts) ** 2) / nrow(second_test)
+
+second_MSE
+```
+
+
+**Evaluation of Second Model**
+With an MSE of our second model already has a fairly low error number. The Adjusted R squared value is also 0.9989.
+More more data points may be neccessary for a more significant model. However with a high Adjusted R-Squared value it does perform strongly.
+
+
+##Conclusions
+At the end of our analysis we came out with two models attempting to predict season-wide fantasy football performance
+of NFL players using in game statistics. Our data cleaning consisted of detecting outliers which we defined as players
+in their respective positions whose aggregated in game performance across their position's metrics were very low
+often close to zero. Next our exploration of our data involved devising an effcient way to determine correlations
+between variables which was a challenge since we had so many. So we used a correlogram to visualize this. We also 
+viewed distributions of each variable independently and against the dependent site_pts variable. Finally our modeling
+produced to models whose errors (MSE) were `r initial_MSE` and `r second_MSE` this is a difference `r initial_MSE - second_MSE` which is small considering
+both modesls did well in extrapolating to new data which was a subset of the players dataset. Eliminating variables that mostly showed weak relationships with the dependent variable, improved the model. This model works very well on this type of  data and showed a strong R-squared value, however more data will improve statistical confidence.
+
+Overall this model has the ability to predict fantasy scores and help draft players with high accuracy.
+
+
